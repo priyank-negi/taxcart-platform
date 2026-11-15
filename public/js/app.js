@@ -1,6 +1,6 @@
 import { createApi } from './api.js';
 import { ICONS } from './icons.js';
-import { esc, PERIODS, periodRange, formatDate, emptyState, errorState, salesTaxReport, clientCard, countryOptions } from './format.js';
+import { esc, PERIODS, periodRange, emptyState, errorState, salesTaxReport, salesTaxCsv, csvFileName, clientCard, countryOptions } from './format.js';
 
 const root = document.getElementById('app');
 const freshLogin = (info = '') => ({ busy: false, error: '', info, email: '' });
@@ -113,7 +113,8 @@ function periodControls() {
        <button class="btn-inline" data-action="apply-period">Show</button>`
     : '';
   return `<div class="toolbar period"><label class="visually-hidden" for="period">Period</label>
-    <select id="period" class="filter-select">${PERIODS.map(([k, label]) => `<option value="${k}" ${k === p.key ? 'selected' : ''}>${label}</option>`).join('')}</select>${custom}</div>`;
+    <select id="period" class="filter-select">${PERIODS.map(([k, label]) => `<option value="${k}" ${k === p.key ? 'selected' : ''}>${label}</option>`).join('')}</select>${custom}
+    ${state.report.status === 'ready' && state.report.data.status === 'ready' ? '<button class="btn-inline" data-action="download-csv">Download CSV</button>' : ''}</div>`;
 }
 
 function renderMain() {
@@ -348,6 +349,14 @@ root.addEventListener('click', async (ev) => {
   } else if (a === 'remove-user') {
     try { const { tenant } = await api.admin.removeUser(id, el.dataset.user); putTenant(tenant, true); notify(id, 'Login removed from this client.'); }
     catch (e) { notify(id, e.message, { error: true }); }
+  } else if (a === 'download-csv') {
+    const report = state.report.data;
+    if (!report || report.status !== 'ready') return;
+    // A leading byte-order mark makes Excel read accented names correctly.
+    const url = URL.createObjectURL(new Blob(['\ufeff', salesTaxCsv(report)], { type: 'text/csv;charset=utf-8' }));
+    const link = Object.assign(document.createElement('a'), { href: url, download: csvFileName(report) });
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   } else if (a === 'copy-temp') {
     const text = document.getElementById('temp-pass')?.textContent ?? '';
     try { await navigator.clipboard.writeText(text); el.textContent = 'Copied'; } catch { el.textContent = 'Select and copy'; }

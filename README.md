@@ -21,6 +21,7 @@ Browser --> Portal (this repo) --> Tax engine --> Shopify data in Postgres
 | Email and password sign-in, forced password change at first sign-in | Built |
 | Staff screen: add a client, connect a Shopify store, choose countries, add and manage logins | Built |
 | Sales & tax report by country, by state for chosen countries, by tax type and rate | Built |
+| Download the report as a CSV file (opens in Excel) | Built |
 | Sales file upload | Not built yet (phase 2) |
 | Zamp filings and registrations | Not built yet (phase 3) |
 

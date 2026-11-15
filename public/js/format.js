@@ -155,6 +155,46 @@ export function salesTaxReport(report) {
   return hero + mixed + marketplace + cards + (report.review ? reviewCard(report.review, cur) : '') + note;
 }
 
+/* ---------------------------------------------------------------- download */
+// Text from outside (tax names, region codes) could start with a character a spreadsheet
+// would run as a formula. A leading apostrophe makes it plain text.
+const safeText = (v) => { const t = String(v ?? ''); return /^[=+\-@\t\r]/.test(t) ? `'${t}` : t; };
+const cell = (v) => { const t = String(v ?? ''); return /[",\r\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+// "8729.8000" -> "8729.80"; keeps extra decimals only when they carry value.
+const amount = (v) => { const n = Number(v); if (v === '' || v == null || !Number.isFinite(n)) return ''; const t = String(v); const m = /^(-?\d+)(?:\.(\d+))?$/.exec(t); if (!m) return t; const dec = (m[2] ?? '').replace(/0+$/, ''); return `${m[1]}.${dec.padEnd(2, '0')}`; };
+const percent = (rate) => { const n = Number(rate); return Number.isFinite(n) ? String(Number((n * 100).toFixed(4))) : ''; };
+
+export const CSV_COLUMNS = ['Country', 'Country code', 'State / region', 'Row type', 'Tax name', 'Tax rate %', 'Orders', 'Net sales', 'Taxable sales', 'Tax collected', 'Tax refunded', 'Net tax', 'Of which collected by a marketplace', 'Currency', 'Period from', 'Period to'];
+
+/**
+ * The report as CSV text. One "Country total" row per country, a "Region total" row per state for
+ * countries reported by region, and a "Tax" row for each tax type and rate. Filter on "Row type"
+ * before adding a column up, since totals and their breakdown are both listed.
+ */
+export function salesTaxCsv(report) {
+  const cur = report.currency ?? report.mixed_currencies.join('/');
+  const { date_from: from, date_to: to } = report.period;
+  const rows = [CSV_COLUMNS];
+  const total = (c, region, type, x) => rows.push([countryName(c.country), c.country, region, type, '', '', x.orders, amount(x.net_sales), '', amount(x.tax_charged), amount(x.refunded_tax), amount(x.net_tax), amount(x.marketplace_tax), cur, from, to]);
+  const taxes = (c, region, list) => list.forEach((k) => rows.push([countryName(c.country), c.country, region, 'Tax', safeText(k.title), percent(k.rate), '', '', amount(k.taxable_sales), amount(k.tax), '', '', '', cur, from, to]));
+  for (const c of report.countries) {
+    total(c, '', 'Country total', c);
+    if (c.split_by_region) {
+      for (const r of c.regions) {
+        const name = safeText(regionName(c.country, r.region));
+        total(c, name, 'Region total', r);
+        taxes(c, name, r.components);
+      }
+    } else taxes(c, '', c.components);
+  }
+  return rows.map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
+}
+
+export function csvFileName(report) {
+  const slug = report.tenant.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'client';
+  return `taxcart-sales-tax-${slug}-${report.period.date_from}-to-${report.period.date_to}.csv`;
+}
+
 /* ---------------------------------------------------------------- staff: clients */
 function userStatus(u) {
   if (u.disabled) return '<span class="status-chip ended">Disabled</span>';
