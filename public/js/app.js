@@ -114,7 +114,7 @@ function periodControls() {
     : '';
   return `<div class="toolbar period"><label class="visually-hidden" for="period">Period</label>
     <select id="period" class="filter-select">${PERIODS.map(([k, label]) => `<option value="${k}" ${k === p.key ? 'selected' : ''}>${label}</option>`).join('')}</select>${custom}
-    ${state.report.status === 'ready' && state.report.data.status === 'ready' ? '<button class="btn-inline" data-action="download-csv">Download CSV</button>' : ''}</div>`;
+    ${state.report.status === 'ready' && state.report.data.status === 'ready' ? '<button class="btn-inline" data-action="download-csv">Download all countries</button>' : ''}</div>`;
 }
 
 function renderMain() {
@@ -353,8 +353,9 @@ root.addEventListener('click', async (ev) => {
     const report = state.report.data;
     if (!report || report.status !== 'ready') return;
     // A leading byte-order mark makes Excel read accented names correctly.
-    const url = URL.createObjectURL(new Blob(['\ufeff', salesTaxCsv(report)], { type: 'text/csv;charset=utf-8' }));
-    const link = Object.assign(document.createElement('a'), { href: url, download: csvFileName(report) });
+    const country = el.dataset.country || null; // set on a country's own button, absent on "all countries"
+    const url = URL.createObjectURL(new Blob(['\ufeff', salesTaxCsv(report, country)], { type: 'text/csv;charset=utf-8' }));
+    const link = Object.assign(document.createElement('a'), { href: url, download: csvFileName(report, country) });
     document.body.append(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   } else if (a === 'copy-temp') {

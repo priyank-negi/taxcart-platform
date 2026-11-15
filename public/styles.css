@@ -382,3 +382,6 @@ table.data tr.sub-row:hover{background:transparent}
   .hero-stat{padding:24px 22px}
   .hero-stat-num{font-size:34px}
 }
+
+.card-head-right{display:flex;align-items:center;gap:18px}
+@media (max-width:640px){.card-head-right{width:100%;justify-content:space-between;flex-direction:row-reverse}}

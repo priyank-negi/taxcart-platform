@@ -119,7 +119,7 @@ function singleCountryCard(c, currency) {
   return `<section class="card list-card" data-country="${esc(c.country)}">${cardHead(ICONS.globe, countryName(c.country), 'By tax type and rate', countryTotal(c, currency))}${table}${foot}</section>`;
 }
 
-const countryTotal = (c, currency) => `<div class="card-total"><div class="card-total-num num">${esc(formatMoney(c.net_tax, currency))}</div><div class="card-sub">Net tax</div></div>`;
+const countryTotal = (c, currency) => `<div class="card-head-right"><button class="btn-inline" data-action="download-csv" data-country="${esc(c.country)}" aria-label="Download ${esc(countryName(c.country))} as CSV">Download CSV</button><div class="card-total"><div class="card-total-num num">${esc(formatMoney(c.net_tax, currency))}</div><div class="card-sub">Net tax</div></div></div>`;
 
 function reviewCard(review, currency) {
   const ex = review.exceptions;
@@ -167,17 +167,18 @@ const percent = (rate) => { const n = Number(rate); return Number.isFinite(n) ? 
 export const CSV_COLUMNS = ['Country', 'Country code', 'State / region', 'Row type', 'Tax name', 'Tax rate %', 'Orders', 'Net sales', 'Taxable sales', 'Tax collected', 'Tax refunded', 'Net tax', 'Of which collected by a marketplace', 'Currency', 'Period from', 'Period to'];
 
 /**
- * The report as CSV text. One "Country total" row per country, a "Region total" row per state for
+ * The report as CSV text, for every country or just one. One "Country total" row per country, a "Region total" row per state for
  * countries reported by region, and a "Tax" row for each tax type and rate. Filter on "Row type"
  * before adding a column up, since totals and their breakdown are both listed.
  */
-export function salesTaxCsv(report) {
+export function salesTaxCsv(report, country = null) {
   const cur = report.currency ?? report.mixed_currencies.join('/');
   const { date_from: from, date_to: to } = report.period;
   const rows = [CSV_COLUMNS];
   const total = (c, region, type, x) => rows.push([countryName(c.country), c.country, region, type, '', '', x.orders, amount(x.net_sales), '', amount(x.tax_charged), amount(x.refunded_tax), amount(x.net_tax), amount(x.marketplace_tax), cur, from, to]);
   const taxes = (c, region, list) => list.forEach((k) => rows.push([countryName(c.country), c.country, region, 'Tax', safeText(k.title), percent(k.rate), '', '', amount(k.taxable_sales), amount(k.tax), '', '', '', cur, from, to]));
   for (const c of report.countries) {
+    if (country && c.country !== country) continue;
     total(c, '', 'Country total', c);
     if (c.split_by_region) {
       for (const r of c.regions) {
@@ -190,9 +191,9 @@ export function salesTaxCsv(report) {
   return rows.map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
 }
 
-export function csvFileName(report) {
+export function csvFileName(report, country = null) {
   const slug = report.tenant.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'client';
-  return `taxcart-sales-tax-${slug}-${report.period.date_from}-to-${report.period.date_to}.csv`;
+  return `taxcart-sales-tax-${slug}-${country ? `${country.toLowerCase()}-` : ''}${report.period.date_from}-to-${report.period.date_to}.csv`;
 }
 
 /* ---------------------------------------------------------------- staff: clients */
