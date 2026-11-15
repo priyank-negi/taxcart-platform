@@ -338,4 +338,5 @@ def test_pages_are_served_with_security_headers(portal):
     assert "script-src 'self'" in r.headers["content-security-policy"] and r.headers["x-frame-options"] == "DENY"
     api = portal.client().get("/api/session")
     assert api.headers["cache-control"] == "no-store"
+    assert portal.client().get("/js/app.js").headers["cache-control"] == "no-cache"
     assert portal.client().get("/api/nope").status_code == 404

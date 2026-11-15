@@ -77,8 +77,9 @@ def create_app(settings=None, fetch_summary=engine.fetch_summary):
             response = JSONResponse({"error": {"code": "server_error", "message": "Something went wrong. Please try again."}}, status_code=500)
         for key, value in SECURITY_HEADERS.items():
             response.headers[key] = value
-        if is_api:
-            response.headers["Cache-Control"] = "no-store"
+        # API answers are never stored. Pages and scripts may be kept by the browser but must be
+        # checked against the server each time, so a new release shows up on the next visit.
+        response.headers["Cache-Control"] = "no-store" if is_api else "no-cache"
         return response
 
     def client_ip(request):
