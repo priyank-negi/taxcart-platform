@@ -55,11 +55,18 @@ SCHEMA = [
 ]
 
 
+# Columns added after the tables first shipped.
+ADDED_COLUMNS = [
+    # The currency the country's return is filed in. NULL means the store's own currency.
+    "ALTER TABLE tenant_countries ADD COLUMN IF NOT EXISTS filing_currency CHAR(3)",
+]
+
+
 def connect(database_url):
     return psycopg.connect(database_url, row_factory=dict_row)
 
 
 def migrate(database_url):
     with connect(database_url) as conn:
-        for statement in SCHEMA:
+        for statement in SCHEMA + ADDED_COLUMNS:
             conn.execute(statement)

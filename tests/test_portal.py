@@ -20,31 +20,43 @@ pytestmark = pytest.mark.skipif(not DB, reason="TEST_DATABASE_URL is not set")
 ADMIN = ("admin@taxcart.test", "first-admin-password-1")
 H = {"X-Requested-With": "taxcart", "Origin": "http://localhost"}
 
+def _j(country, province, currency, filing, orders, net_sales, tax, refunded="0.0000", channel="0.0000", refunds=0):
+    net = format(__import__("decimal").Decimal(tax) - __import__("decimal").Decimal(refunded), "f")
+    return {"country": country, "province": province, "currency": currency, "filing_currency": filing,
+            "in_filing_currency": currency == filing, "orders": orders, "net_sales": net_sales,
+            "tax_charged": tax, "refunds": refunds, "refunded_tax": refunded,
+            "refund_tax_adjustments": "0.0000", "net_tax": net, "channel_liable_tax": channel}
+
+
 SUMMARY = {
     "shop": "shop-a.myshopify.com", "date_from": "2026-10-01", "date_to": "2026-10-31", "timezone": "UTC",
-    "countries": ["US", "GB"], "split": ["US"], "currencies": ["USD"],
-    "totals": {"orders": 8, "net_sales": "8929.8000", "tax_charged": "738.3600", "refunded_tax": "20.0000",
-               "refund_tax_adjustments": "0.0000", "net_tax": "718.3600", "channel_liable_tax": "0.0000"},
+    "countries": ["US", "GB"], "split": ["US"], "filing": {"GB": "GBP"}, "currencies": ["USD"],
+    "totals_by_currency": [
+        {"currency": "GBP", "orders": 2, "net_sales": "160.0000", "tax_charged": "32.0000", "refunded_tax": "16.0000",
+         "refund_tax_adjustments": "0.0000", "net_tax": "16.0000", "channel_liable_tax": "0.0000"},
+        {"currency": "USD", "orders": 7, "net_sales": "8829.8000", "tax_charged": "758.3600", "refunded_tax": "0.0000",
+         "refund_tax_adjustments": "0.0000", "net_tax": "758.3600", "channel_liable_tax": "7.2500"},
+    ],
+    "totals": None,
     "by_jurisdiction": [
-        {"country": "GB", "province": None, "orders": 2, "net_sales": "200.0000", "tax_charged": "40.0000",
-         "refunds": 1, "refunded_tax": "20.0000", "refund_tax_adjustments": "0.0000", "net_tax": "20.0000"},
-        {"country": "US", "province": "CA", "orders": 1, "net_sales": "100.0000", "tax_charged": "0.0000",
-         "refunds": 0, "refunded_tax": "0.0000", "refund_tax_adjustments": "0.0000", "net_tax": "0.0000",
-         "channel_liable_tax": "7.2500"},
-        {"country": "US", "province": "TX", "orders": 5, "net_sales": "8629.8000", "tax_charged": "698.3600",
-         "refunds": 0, "refunded_tax": "0.0000", "refund_tax_adjustments": "0.0000", "net_tax": "698.3600"},
+        _j("GB", None, "GBP", "GBP", 2, "160.0000", "32.0000", refunded="16.0000", refunds=1),
+        _j("GB", None, "USD", "GBP", 1, "100.0000", "60.0000"),
+        _j("US", "CA", "USD", "USD", 1, "100.0000", "0.0000", channel="7.2500"),
+        _j("US", "TX", "USD", "USD", 5, "8629.8000", "698.3600"),
     ],
     "by_component": [
-        {"country": "GB", "province": None, "title": "GB VAT", "rate": "0.200000", "orders": 2,
-         "implied_taxable_sales": "200.00", "tax_collected": "40.0000"},
-        {"country": "US", "province": "TX", "title": "Santa Rosa City Tax", "rate": "0.017500", "orders": 5,
+        {"country": "GB", "province": None, "currency": "GBP", "title": "GB VAT", "rate": "0.200000", "orders": 2,
+         "implied_taxable_sales": "160.00", "tax_collected": "32.0000"},
+        {"country": "GB", "province": None, "currency": "USD", "title": "GB VAT", "rate": "0.200000", "orders": 1,
+         "implied_taxable_sales": "300.00", "tax_collected": "60.0000"},
+        {"country": "US", "province": "TX", "currency": "USD", "title": "Santa Rosa City Tax", "rate": "0.017500", "orders": 5,
          "implied_taxable_sales": "8729.14", "tax_collected": "152.7600"},
-        {"country": "US", "province": "TX", "title": "Texas State Tax", "rate": "0.062500", "orders": 5,
+        {"country": "US", "province": "TX", "currency": "USD", "title": "Texas State Tax", "rate": "0.062500", "orders": 5,
          "implied_taxable_sales": "8729.60", "tax_collected": "545.6000"},
     ],
-    "outside_selection": [{"country": "CA", "orders": 3, "net_sales": "500.0000", "tax_charged": "0.0000"}],
+    "outside_selection": [{"country": "CA", "currency": "USD", "orders": 3, "net_sales": "500.0000", "tax_charged": "0.0000"}],
     "exceptions": {"missing_destination": [], "refund_mismatch": [],
-                   "untaxed": [{"name": "#1002", "order_id": 1, "country": "US", "province": "CA"}]},
+                   "untaxed": [{"name": "#1002", "order_id": 1, "country": "US", "province": "CA", "currency": "USD"}]},
 }
 
 
@@ -58,8 +70,8 @@ class Portal:
             database_url=DB, engine_url="http://engine.invalid", engine_key="k", origins=("http://localhost",),
             session_days=7, cookie_secure=False, bootstrap_email=ADMIN[0], bootstrap_password=ADMIN[1])
 
-        def fake_fetch(_settings, shop, date_from, date_to, countries, split):
-            self.engine_calls.append((shop, date_from, date_to, countries, split))
+        def fake_fetch(_settings, shop, date_from, date_to, countries, split, filing=None):
+            self.engine_calls.append((shop, date_from, date_to, countries, split, filing))
             if self.engine_error:
                 raise self.engine_error
             return SUMMARY
@@ -93,10 +105,12 @@ def portal():
     return Portal()
 
 
-def make_tenant(staff, name="Acme Pty Ltd", shop="shop-a.myshopify.com", countries=(("US", True), ("GB", False))):
+def make_tenant(staff, name="Acme Pty Ltd", shop="shop-a.myshopify.com",
+                countries=(("US", True, None), ("GB", False, "GBP"))):
     tid = staff.post("/api/admin/tenants", json={"name": name}, headers=H).json()["tenant"]["id"]
     r = staff.put(f"/api/admin/tenants/{tid}", headers=H, json={
-        "shop_domain": shop, "countries": [{"country": c, "split_by_region": s} for c, s in countries]})
+        "shop_domain": shop,
+        "countries": [{"country": c, "split_by_region": s, "filing_currency": f} for c, s, f in countries]})
     assert r.status_code == 200, r.text
     return tid
 
@@ -198,7 +212,8 @@ def test_staff_sets_up_a_client(portal):
     tid = make_tenant(staff)
     t = staff.get("/api/admin/tenants").json()["tenants"][0]
     assert t["id"] == tid and t["shop_domain"] == "shop-a.myshopify.com"
-    assert t["countries"] == [{"country": "US", "split_by_region": True}, {"country": "GB", "split_by_region": False}]
+    assert t["countries"] == [{"country": "US", "split_by_region": True, "filing_currency": None},
+                              {"country": "GB", "split_by_region": False, "filing_currency": "GBP"}]
     added = staff.post(f"/api/admin/tenants/{tid}/users", json={"email": "Owner@Acme.test"}, headers=H).json()
     assert added["email"] == "owner@acme.test" and len(added["temporary_password"]) >= 12
     assert [u["email"] for u in added["tenant"]["users"]] == ["owner@acme.test"]
@@ -211,7 +226,7 @@ def test_staff_sets_up_a_client(portal):
 @pytest.mark.parametrize("payload", [
     {"shop_domain": "evil.example.com"}, {"shop_domain": "a b.myshopify.com"},
     {"countries": [{"country": "USA"}]}, {"countries": [{"country": "US"}, {"country": "us"}]},
-    {"countries": "US"}, {"name": ""},
+    {"countries": "US"}, {"name": ""}, {"countries": [{"country": "GB", "filing_currency": "POUND"}]},
 ])
 def test_bad_setup_values_are_rejected(portal, payload):
     staff = portal.staff()
@@ -262,19 +277,25 @@ def test_client_sees_their_report_without_review_items(portal):
     r = c.get(REPORT.format(tid))
     assert r.status_code == 200, r.text
     body = r.json()
-    assert portal.engine_calls[-1] == ("shop-a.myshopify.com", date(2026, 10, 1), date(2026, 10, 31), ["US", "GB"], ["US"])
-    assert body["status"] == "ready" and body["currency"] == "USD" and body["tenant"]["name"] == "Acme Pty Ltd"
+    assert portal.engine_calls[-1] == ("shop-a.myshopify.com", date(2026, 10, 1), date(2026, 10, 31), ["US", "GB"], ["US"], {"GB": "GBP"})
+    assert body["status"] == "ready" and body["store_currency"] == "USD" and body["tenant"]["name"] == "Acme Pty Ltd"
     assert "review" not in body and "shop" not in body and "exceptions" not in str(body)
+    assert [(t["currency"], t["net_tax"]) for t in body["totals_by_currency"]] == [("GBP", "16.0000"), ("USD", "758.3600")]
     us, gb = body["countries"]
-    assert us["country"] == "US" and us["orders"] == 6 and us["net_tax"] == "698.3600"
-    assert [x["region"] for x in us["regions"]] == ["CA", "TX"]
-    tx = us["regions"][1]
+    # US files in the store currency: one part, by state
+    assert us["filing_currency"] == "USD" and len(us["parts"]) == 1
+    usp = us["parts"][0]
+    assert usp["currency"] == "USD" and usp["in_filing_currency"] and usp["orders"] == 6 and usp["net_tax"] == "698.3600"
+    assert [x["region"] for x in usp["regions"]] == ["CA", "TX"]
+    tx = usp["regions"][1]
     assert [(k["title"], k["tax"]) for k in tx["components"]] == [("Santa Rosa City Tax", "152.7600"), ("Texas State Tax", "545.6000")]
-    assert us["regions"][0]["components"] == []
-    assert us["regions"][0]["marketplace_tax"] == "7.2500" and us["marketplace_tax"] == "7.2500" and gb["marketplace_tax"] == "0"
-    assert gb["country"] == "GB" and "regions" not in gb and gb["net_tax"] == "20.0000"
-    assert gb["components"] == [{"title": "GB VAT", "rate": "0.200000", "taxable_sales": "200.00", "tax": "40.0000"}]
-    assert body["totals"]["net_tax"] == "718.3600"
+    assert usp["regions"][0]["marketplace_tax"] == "7.2500" and usp["marketplace_tax"] == "7.2500"
+    # GB files in GBP: the GBP part comes first, the order charged in USD is a separate, unconverted part
+    assert gb["filing_currency"] == "GBP" and [(p["currency"], p["in_filing_currency"]) for p in gb["parts"]] == [("GBP", True), ("USD", False)]
+    gbp, usd = gb["parts"]
+    assert gbp["net_tax"] == "16.0000" and gbp["refunded_tax"] == "16.0000" and "regions" not in gbp
+    assert gbp["components"] == [{"title": "GB VAT", "rate": "0.200000", "taxable_sales": "160.00", "tax": "32.0000"}]
+    assert usd["net_tax"] == "60.0000" and [k["tax"] for k in usd["components"]] == ["60.0000"]
 
 
 def test_staff_also_get_review_items(portal):
@@ -287,9 +308,11 @@ def test_staff_also_get_review_items(portal):
 
 def test_a_configured_country_with_no_sales_still_appears(portal):
     staff = portal.staff()
-    tid = make_tenant(staff, countries=(("US", True), ("GB", False), ("DE", False)))
+    tid = make_tenant(staff, countries=(("US", True, None), ("GB", False, "GBP"), ("DE", False, "EUR")))
     de = staff.get(REPORT.format(tid)).json()["countries"][1]
-    assert de["country"] == "DE" and de["orders"] == 0 and de["net_tax"] == "0" and de["components"] == []
+    assert de["country"] == "DE" and de["filing_currency"] == "EUR"
+    assert de["parts"] == [{"currency": "EUR", "in_filing_currency": True, "orders": 0, "net_sales": "0", "tax_charged": "0",
+                            "refunded_tax": "0", "net_tax": "0", "marketplace_tax": "0", "components": []}]
 
 
 def test_clients_cannot_see_another_clients_report(portal):

@@ -19,10 +19,12 @@ class EngineError(Exception):
         self.status = status
 
 
-def fetch_summary(settings, shop, date_from, date_to, countries, split):
+def fetch_summary(settings, shop, date_from, date_to, countries, split, filing=None):
+    """filing: {country: currency its return is filed in}; countries left out use the store's currency."""
     query = urllib.parse.urlencode({
         "shop": shop, "date_from": date_from.isoformat(), "date_to": date_to.isoformat(),
         "countries": ",".join(countries), "split": ",".join(split),
+        "filing": ",".join(f"{c}:{cur}" for c, cur in (filing or {}).items()),
     })
     req = urllib.request.Request(f"{settings.engine_url}/reports/summary?{query}",
                                  headers={"X-Internal-Key": settings.engine_key})
@@ -53,47 +55,63 @@ def _component(row):
             "taxable_sales": row["implied_taxable_sales"], "tax": row["tax_collected"]}
 
 
+def _money_block(rows):
+    out = {"orders": sum(r["orders"] for r in rows)}
+    for key in _MONEY:
+        out[key] = _s(sum((_d(r[key]) for r in rows), Decimal(0)))
+    # Tax a marketplace collected and remits itself. It is part of tax_charged.
+    out["marketplace_tax"] = _s(sum((_d(r.get("channel_liable_tax")) for r in rows), Decimal(0)))
+    return out
+
+
 def shape(summary, configured, staff):
     """Turn the engine's flat rows into one block per configured country.
 
-    configured: [{"country": "US", "split_by_region": True}, ...] in display order.
-    Every configured country appears, even with no sales, so an empty period reads
-    as "nothing sold" and not as "missing".
+    configured: [{"country": "US", "split_by_region": True, "filing_currency": "USD" or None}, ...]
+    in display order. Every configured country appears, even with no sales, so an empty period
+    reads as "nothing sold" and not as "missing".
+
+    Each country is split into parts, one per currency. The part in the filing currency comes
+    first. Any other part holds orders charged in a different currency, shown as charged and
+    not converted. Amounts in different currencies are never added together.
     """
+    store_currency = (summary.get("currencies") or [None])[0]
     components = {}
     for row in summary["by_component"]:
-        components.setdefault((row["country"], row["province"]), []).append(_component(row))
+        components.setdefault((row["country"], row["province"], row["currency"]), []).append(_component(row))
 
     countries = []
     for entry in configured:
         code, split = entry["country"], entry["split_by_region"]
+        filing = entry.get("filing_currency") or store_currency
         rows = [r for r in summary["by_jurisdiction"] if r["country"] == code]
-        block = {"country": code, "split_by_region": split,
-                 "orders": sum(r["orders"] for r in rows)}
-        for key in _MONEY:
-            block[key] = _s(sum((_d(r[key]) for r in rows), Decimal(0)))
-        # Tax a marketplace collected and remits itself. It is part of tax_charged.
-        block["marketplace_tax"] = _s(sum((_d(r.get("channel_liable_tax")) for r in rows), Decimal(0)))
-        if split:
-            block["regions"] = [{
-                "region": r["province"], "orders": r["orders"],
-                **{key: r[key] for key in _MONEY},
-                "marketplace_tax": r.get("channel_liable_tax", "0"),
-                "components": components.get((code, r["province"]), []),
-            } for r in rows]
-        else:
-            block["components"] = components.get((code, None), [])
-        countries.append(block)
+        currencies = sorted({r["currency"] for r in rows} | {filing}, key=lambda c: (c != filing, c or ""))
+        parts = []
+        for cur in currencies:
+            mine = [r for r in rows if r["currency"] == cur]
+            if not mine and cur != filing:
+                continue
+            part = {"currency": cur, "in_filing_currency": cur == filing, **_money_block(mine)}
+            if split:
+                part["regions"] = [{
+                    "region": r["province"], "orders": r["orders"],
+                    **{key: r[key] for key in _MONEY},
+                    "marketplace_tax": r.get("channel_liable_tax", "0"),
+                    "components": components.get((code, r["province"], cur), []),
+                } for r in mine]
+            else:
+                part["components"] = components.get((code, None, cur), [])
+            parts.append(part)
+        countries.append({"country": code, "split_by_region": split, "filing_currency": filing, "parts": parts})
 
-    currencies = summary.get("currencies") or []
-    totals = summary["totals"]
+    totals = [{"currency": t["currency"], "orders": t["orders"], **{key: t[key] for key in _MONEY},
+               "marketplace_tax": t.get("channel_liable_tax", "0")}
+              for t in summary.get("totals_by_currency") or []]
     out = {
         "period": {"date_from": summary["date_from"], "date_to": summary["date_to"],
                    "timezone": summary.get("timezone", "UTC")},
-        "currency": currencies[0] if len(currencies) == 1 else None,
-        "mixed_currencies": currencies if len(currencies) > 1 else [],
-        "totals": {"orders": totals["orders"], **{key: totals[key] for key in _MONEY},
-                   "marketplace_tax": totals.get("channel_liable_tax", "0")},
+        "store_currency": store_currency,
+        "totals_by_currency": totals,
         "countries": countries,
     }
     if staff:

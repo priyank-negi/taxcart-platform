@@ -240,7 +240,7 @@ def create_app(settings=None, fetch_summary=engine.fetch_summary):
             source = conn.execute("SELECT ref FROM tenant_sources WHERE tenant_id = %s AND kind = 'shopify'",
                                   (row["id"],)).fetchone()
             configured = conn.execute(
-                "SELECT country, split_by_region FROM tenant_countries WHERE tenant_id = %s "
+                "SELECT country, split_by_region, filing_currency FROM tenant_countries WHERE tenant_id = %s "
                 "ORDER BY (country <> 'US'), country", (row["id"],)).fetchall()
         base = {"tenant": {"id": str(row["id"]), "name": row["name"]}}
         if not source or not configured:
@@ -250,7 +250,8 @@ def create_app(settings=None, fetch_summary=engine.fetch_summary):
         try:
             summary = fetch_summary(settings, source["ref"], date_from, date_to,
                                     [c["country"] for c in configured],
-                                    [c["country"] for c in configured if c["split_by_region"]])
+                                    [c["country"] for c in configured if c["split_by_region"]],
+                                    {c["country"]: c["filing_currency"] for c in configured if c["filing_currency"]})
         except engine.EngineError as e:
             raise ApiError(e.status, "report_unavailable", str(e))
         return {**base, "status": "ready", **engine.shape(summary, configured, user["is_staff"])}
@@ -263,7 +264,7 @@ def create_app(settings=None, fetch_summary=engine.fetch_summary):
         source = conn.execute("SELECT ref FROM tenant_sources WHERE tenant_id = %s AND kind = 'shopify'", (tenant_id,)).fetchone()
         t["shop_domain"] = source["ref"] if source else None
         t["countries"] = conn.execute(
-            "SELECT country, split_by_region FROM tenant_countries WHERE tenant_id = %s ORDER BY (country <> 'US'), country",
+            "SELECT country, split_by_region, filing_currency FROM tenant_countries WHERE tenant_id = %s ORDER BY (country <> 'US'), country",
             (tenant_id,)).fetchall()
         t["users"] = conn.execute(
             """SELECT u.id::text AS id, u.email, u.disabled, u.must_change_password, u.last_login_at
@@ -322,10 +323,13 @@ def create_app(settings=None, fetch_summary=engine.fetch_summary):
                     if code in seen:
                         raise ApiError(400, "bad_request", f"{code} is listed twice.")
                     seen.add(code)
-                    rows.append((tenant_id, code, bool(item.get("split_by_region"))))
+                    currency = str(item.get("filing_currency") or "").strip().upper() or None
+                    if currency and not re.fullmatch(r"[A-Z]{3}", currency):
+                        raise ApiError(400, "bad_request", f"The filing currency for {code} must be a three-letter code, for example GBP.")
+                    rows.append((tenant_id, code, bool(item.get("split_by_region")), currency))
                 conn.execute("DELETE FROM tenant_countries WHERE tenant_id = %s", (tenant_id,))
                 for row in rows:
-                    conn.execute("INSERT INTO tenant_countries (tenant_id, country, split_by_region) VALUES (%s, %s, %s)", row)
+                    conn.execute("INSERT INTO tenant_countries (tenant_id, country, split_by_region, filing_currency) VALUES (%s, %s, %s, %s)", row)
             audit(conn, user["id"], "tenant.updated", tenant=tenant_id, fields=sorted(k for k in data if k in ("name", "shop_domain", "countries")))
             return {"tenant": tenant_detail(conn, tenant_id)}
 

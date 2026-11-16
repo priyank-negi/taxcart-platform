@@ -1,6 +1,6 @@
 import { createApi } from './api.js';
 import { ICONS } from './icons.js';
-import { esc, PERIODS, periodRange, emptyState, errorState, salesTaxReport, salesTaxCsv, csvFileName, clientCard, countryOptions } from './format.js';
+import { esc, PERIODS, periodRange, emptyState, errorState, salesTaxReport, salesTaxCsv, csvFileName, clientCard, countryOptions, defaultFilingCurrency } from './format.js';
 
 const root = document.getElementById('app');
 const freshLogin = (info = '') => ({ busy: false, error: '', info, email: '' });
@@ -301,6 +301,9 @@ root.addEventListener('change', (ev) => {
     state.period = range ? { key: el.value, ...range } : { ...state.period, key: 'custom' };
     paintMain();
     if (range) loadReport();
+  } else if (el.dataset.action === 'set-currency') {
+    syncDraft(el.dataset.tenant);
+    state.admin.drafts[el.dataset.tenant].countries[Number(el.dataset.index)].filing_currency = el.value || null;
   } else if (el.dataset.action === 'toggle-split') {
     syncDraft(el.dataset.tenant);
     state.admin.drafts[el.dataset.tenant].countries[Number(el.dataset.index)].split_by_region = el.checked;
@@ -309,7 +312,7 @@ root.addEventListener('change', (ev) => {
 
 root.addEventListener('click', async (ev) => {
   const el = ev.target.closest('[data-action]');
-  if (!el || el.tagName === 'INPUT') return;
+  if (!el || el.tagName === 'INPUT' || el.tagName === 'SELECT') return;
   const a = el.dataset.action, id = el.dataset.tenant, admin = state.admin;
   syncAllDrafts(); // keep anything typed in the client cards before this action repaints them
   if (a === 'reload') location.reload();
@@ -326,7 +329,7 @@ root.addEventListener('click', async (ev) => {
   } else if (a === 'add-country') {
     const code = document.getElementById(`add-country-${id}`).value;
     if (!code) return;
-    admin.drafts[id].countries.push({ country: code, split_by_region: code === 'US' });
+    admin.drafts[id].countries.push({ country: code, split_by_region: code === 'US', filing_currency: defaultFilingCurrency(code) });
     admin.notice = null; paintMain();
   } else if (a === 'remove-country') {
     admin.drafts[id].countries.splice(Number(el.dataset.index), 1); admin.notice = null; paintMain();
